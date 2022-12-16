@@ -1,4 +1,16 @@
 // define all versioned plugins here and apply in subprojects as necessary without version
+buildscript {
+  repositories {
+    mavenLocal()
+    maven { url 'http://nexus:8081/repository/maven-public/'}
+    maven {
+      url 'https://maven.aliyun.com/repository/gradle-plugin'
+    }
+    maven {
+      url 'https://maven.aliyun.com/repository/public'
+    }
+  }
+}
 plugins {
   id 'com.github.sherter.google-java-format' version '0.9' apply false
   id 'net.ltgt.errorprone' version '3.0.1' apply false
@@ -71,6 +83,8 @@ subprojects {
 
   repositories {
     mavenCentral()
+    maven { url 'http://nexus:8081/repository/maven-public/'}
+    maven { url 'http://maven.aliyun.com/nexus/content/groups/public/' }
   }
 
   apply plugin: 'java'
@@ -337,6 +351,16 @@ subprojects {
               connection = 'scm:https://github.com/GoogleContainerTools/jib.git'
               developerConnection = 'scm:git://github.com/GoogleContainerTools/jib.git'
             }
+          }
+        }
+      }
+      repositories {
+        maven {
+          name 'nexus'
+          url "http://nexus:8081/repository/maven-releases/"
+          credentials {
+            username "admin"
+            password "12345678@cdhr"
           }
         }
       }
