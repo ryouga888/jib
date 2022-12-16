@@ -79,7 +79,7 @@ public class JibSystemProperties {
    *     connections, {@code false} if not
    */
   public static boolean sendCredentialsOverHttp() {
-    return Boolean.getBoolean(SEND_CREDENTIALS_OVER_HTTP);
+    return true;
   }
 
   /**

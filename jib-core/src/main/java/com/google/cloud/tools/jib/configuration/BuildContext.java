@@ -73,7 +73,7 @@ public class BuildContext implements Closeable {
     @Nullable private ContainerConfiguration containerConfiguration;
     @Nullable private Path applicationLayersCacheDirectory;
     @Nullable private Path baseImageLayersCacheDirectory;
-    private boolean allowInsecureRegistries = false;
+    private boolean allowInsecureRegistries = true;
     private boolean offline = false;
     private ImmutableList<FileEntriesLayer> layerConfigurations = ImmutableList.of();
     private Class<? extends BuildableManifestTemplate> targetFormat = DEFAULT_TARGET_FORMAT;

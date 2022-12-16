@@ -153,7 +153,7 @@ public class Containerizer {
   @Nullable private ExecutorService executorService;
   private Path baseImageLayersCacheDirectory = DEFAULT_BASE_CACHE_DIRECTORY;
   @Nullable private Path applicationLayersCacheDirectory;
-  private boolean allowInsecureRegistries = false;
+  private boolean allowInsecureRegistries = true;
   private boolean offline = false;
   private String toolName = DEFAULT_TOOL_NAME;
   @Nullable private String toolVersion = DEFAULT_TOOL_VERSION;

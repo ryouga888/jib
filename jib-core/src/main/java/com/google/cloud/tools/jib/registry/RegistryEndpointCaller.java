@@ -109,7 +109,7 @@ class RegistryEndpointCaller<T> {
    * @throws RegistryException for known exceptions when interacting with the registry
    */
   T call() throws IOException, RegistryException {
-    String apiRouteBase = "https://" + registryEndpointRequestProperties.getServerUrl() + "/v2/";
+    String apiRouteBase = "http://" + registryEndpointRequestProperties.getServerUrl() + "/v2/";
     URL initialRequestUrl = registryEndpointProvider.getApiRoute(apiRouteBase);
     return call(initialRequestUrl);
   }
