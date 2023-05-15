@@ -61,6 +61,7 @@ public abstract class JibPluginConfiguration extends AbstractMojo {
 
     @Nullable @Parameter private String username;
     @Nullable @Parameter private String password;
+
     private final String source;
 
     private AuthConfiguration(String source) {
@@ -362,6 +363,10 @@ public abstract class JibPluginConfiguration extends AbstractMojo {
 
   @Component protected SettingsDecrypter settingsDecrypter;
 
+  @Parameter private boolean ignoreClasses = false;
+  @Parameter private boolean ignoreResources = false;
+  @Parameter private boolean experimental = false;
+
   @Parameter private FromConfiguration from = new FromConfiguration();
   @Parameter private ToConfiguration to = new ToConfiguration();
   @Parameter private ContainerParameters container = new ContainerParameters();
@@ -380,7 +385,7 @@ public abstract class JibPluginConfiguration extends AbstractMojo {
   private boolean skip;
 
   @Parameter private List<ExtensionParameters> pluginExtensions = Collections.emptyList();
-  @Inject private Set<JibMavenPluginExtension<?>> injectedPluginExtensions = Collections.emptySet();
+  private final Set<JibMavenPluginExtension<?>> injectedPluginExtensions = Collections.emptySet();
 
   protected Set<JibMavenPluginExtension<?>> getInjectedPluginExtensions() {
     return injectedPluginExtensions;
@@ -810,6 +815,12 @@ public abstract class JibPluginConfiguration extends AbstractMojo {
   boolean isSkipped() {
     return skip;
   }
+
+  boolean isIgnoreClasses() { return ignoreClasses; }
+
+  boolean isIgnoreResources() { return ignoreResources; }
+
+  boolean isExperimental() { return experimental; }
 
   List<ExtensionParameters> getPluginExtensions() {
     return pluginExtensions;

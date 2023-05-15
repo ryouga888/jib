@@ -71,8 +71,8 @@ public class BuildTarMojo extends JibPluginConfiguration {
         getSession().getSettings(), getSettingsDecrypter());
 
     TempDirectoryProvider tempDirectoryProvider = new TempDirectoryProvider();
-    MavenProjectProperties projectProperties =
-        MavenProjectProperties.getForProject(
+    MavenProjectPropertiesForPartial projectProperties =
+        MavenProjectPropertiesForPartial.getForProject(
             Preconditions.checkNotNull(descriptor),
             getProject(),
             getSession(),

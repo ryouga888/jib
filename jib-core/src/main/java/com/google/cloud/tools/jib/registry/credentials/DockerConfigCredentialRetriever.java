@@ -87,8 +87,7 @@ public class DockerConfigCredentialRetriever {
       return Optional.empty();
     }
 
-    ObjectMapper objectMapper =
-        new ObjectMapper().configure(MapperFeature.ACCEPT_CASE_INSENSITIVE_PROPERTIES, true);
+    ObjectMapper objectMapper = new ObjectMapper().configure(MapperFeature.ACCEPT_CASE_INSENSITIVE_PROPERTIES, true);
     try (InputStream fileIn = Files.newInputStream(dockerConfigFile)) {
       if (legacyConfigFormat) {
         // legacy config format is the value of the "auths":{ <map> } block of the new config (i.e.,

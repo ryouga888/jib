@@ -35,10 +35,8 @@ import com.google.cloud.tools.jib.plugins.extension.JibPluginExtensionException;
 import com.google.cloud.tools.jib.plugins.extension.NullExtension;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Splitter;
 import com.google.common.base.Verify;
-import org.apache.commons.io.FileUtils;
-import org.apache.commons.io.IOUtils;
-import org.apache.commons.lang3.StringUtils;
 import org.apache.maven.artifact.Artifact;
 import org.apache.maven.execution.MavenSession;
 import org.apache.maven.model.Build;
@@ -51,48 +49,42 @@ import org.apache.maven.shared.utils.Os;
 import org.codehaus.plexus.util.xml.Xpp3Dom;
 
 import javax.annotation.Nullable;
-import java.io.File;
-import java.io.IOException;
+import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.*;
-import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
 import java.util.stream.Collectors;
 
 /**
  * Obtains information about a {@link MavenProject}.
  */
-public class MavenProjectProperties implements ProjectProperties {
+@SuppressWarnings("DuplicatedCode")
+public class MavenProjectPropertiesForPartial implements ProjectProperties {
 
     /**
      * Used for logging during main class inference and analysis of user configuration.
      */
     public static final String PLUGIN_NAME = "jib-maven-plugin";
-
     /**
      * Used to identify this plugin when interacting with the maven system.
      */
     public static final String PLUGIN_KEY = "com.google.cloud.tools:" + PLUGIN_NAME;
-
     /**
      * Used to generate the User-Agent header and history metadata.
      */
     private static final String TOOL_NAME = "jib-maven-plugin";
-
     /**
      * Used for logging during main class inference.
      */
     private static final String JAR_PLUGIN_NAME = "'maven-jar-plugin'";
-
     private static final Duration LOGGING_THREAD_SHUTDOWN_TIMEOUT = Duration.ofSeconds(1);
-    private static final String BASE_LIBRARY_MAVEN_ID_PROPERTY_NAME = "base-library-maven-id";
-    private static final ClassLoader classLoader = MavenProjectProperties.class.getClassLoader();
-    private final Path jibDirPath = Paths.get(System.getProperty("user.home"), ".jib");
-    private final Path dependencyLogDirPath = jibDirPath.resolve("dependencies");
     private final PluginDescriptor jibPluginDescriptor;
     private final MavenProject project;
     private final MavenSession session;
@@ -101,8 +93,9 @@ public class MavenProjectProperties implements ProjectProperties {
     private final TempDirectoryProvider tempDirectoryProvider;
     private final Collection<JibMavenPluginExtension<?>> injectedExtensions;
     private final Supplier<List<JibMavenPluginExtension<?>>> extensionLoader;
+
     @VisibleForTesting
-    MavenProjectProperties(
+    MavenProjectPropertiesForPartial(
             PluginDescriptor jibPluginDescriptor,
             MavenProject project,
             MavenSession session,
@@ -147,7 +140,7 @@ public class MavenProjectProperties implements ProjectProperties {
      * @param injectedExtensions    the extensions injected into the Mojo
      * @return a MavenProjectProperties from the given project and logger.
      */
-    public static MavenProjectProperties getForProject(
+    public static MavenProjectPropertiesForPartial getForProject(
             PluginDescriptor jibPluginDescriptor,
             MavenProject project,
             MavenSession session,
@@ -164,7 +157,7 @@ public class MavenProjectProperties implements ProjectProperties {
                     }
                     return extensions;
                 };
-        return new MavenProjectProperties(
+        return new MavenProjectPropertiesForPartial(
                 jibPluginDescriptor,
                 project,
                 session,
@@ -260,7 +253,9 @@ public class MavenProjectProperties implements ProjectProperties {
     }
 
     @Override
-    public JibContainerBuilder createJibContainerBuilder(JavaContainerBuilder javaContainerBuilder, ContainerizingMode containerizingMode) throws IOException {
+    public JibContainerBuilder createJibContainerBuilder(
+            JavaContainerBuilder javaContainerBuilder, ContainerizingMode containerizingMode)
+            throws IOException {
         try {
             if (isWarProject()) {
                 Path war = getWarArtifact();
@@ -274,22 +269,6 @@ public class MavenProjectProperties implements ProjectProperties {
                                 .map(File::getName)
                                 .collect(Collectors.toSet()));
             }
-
-            // 从基库的日志文件中加载基库的依赖列表，以便在生成镜像时排除这些依赖库
-            if (!Files.exists(dependencyLogDirPath)) {
-                Files.createDirectories(dependencyLogDirPath);
-                Files.setAttribute(dependencyLogDirPath, "dos:hidden", true);
-            }
-
-            final String baseLibraryMavenId = project.getProperties().getProperty(BASE_LIBRARY_MAVEN_ID_PROPERTY_NAME);
-            final Map<String, String> baseLibraryDependencies = !Objects.isNull(baseLibraryMavenId)
-                    && !baseLibraryMavenId.isEmpty()
-                    && Files.exists(dependencyLogDirPath.resolve(baseLibraryMavenId))
-                    ? Files.readAllLines(dependencyLogDirPath.resolve(baseLibraryMavenId)).stream()
-                    .filter(line -> !Objects.isNull(line) && !line.isEmpty())
-                    .map(line -> StringUtils.split(line, ","))
-                    .collect(Collectors.toMap(items -> items[0], items -> items[1]))
-                    : new HashMap<>();
 
             switch (containerizingMode) {
                 case EXPLODED:
@@ -311,84 +290,18 @@ public class MavenProjectProperties implements ProjectProperties {
                     throw new IllegalStateException("unknown containerizing mode: " + containerizingMode);
             }
 
-            Function<Artifact, String> getArtifactFullId = artifact -> artifact.hasClassifier()
-                    ? artifact.getGroupId() + ":" + artifact.getArtifactId() + ":" + artifact.getVersion() + ":" + artifact.getClassifier()
-                    : artifact.getGroupId() + ":" + artifact.getArtifactId() + ":" + artifact.getVersion();
-
-            // 把本工程的依赖写入日志文件（格式：jar包标识,jar包文件名)
-            // jar包标识:
-            // 1.如果有classifier: groupId:artifactId:version:classifier
-            // 2.如果没有classifier: groupId:artifactId:version
-            final String projectIdFileName = project.getGroupId() + "_" + project.getArtifactId() + "_" + project.getVersion();
-            final Path dependencyLogPath = dependencyLogDirPath.resolve(projectIdFileName);
-
-            final List<Artifact> projectArtifactsIncludesSelf = new ArrayList<>(project.getArtifacts());
-            projectArtifactsIncludesSelf.add(project.getArtifact());
-
-            final List<String> dependenciesToLog = new ArrayList<>();
-            for (Artifact artifact : projectArtifactsIncludesSelf) {
-                if (artifact == project.getArtifact() || Artifact.SCOPE_COMPILE_PLUS_RUNTIME.contains(artifact.getScope())) {
-                    dependenciesToLog.add(getArtifactFullId.apply(artifact) + "," + artifact.getFile().getName());
-                }
-            }
-            dependenciesToLog.sort(String::compareTo);
-            Files.write(dependencyLogPath, dependenciesToLog);
-
-            // 不把基库已经包含的依赖写入docker镜像中
-            final Set<Artifact> resolvedDependencyExcludeThoseFromBaseLibrary = project.getArtifacts().stream()
-                    .filter(artifact -> !baseLibraryDependencies.containsKey(getArtifactFullId.apply(artifact)))
-                    .collect(Collectors.toSet());
-
-            Map<LayerType, List<Path>> classifiedDependencies = classifyDependencies(
-                    resolvedDependencyExcludeThoseFromBaseLibrary,
-                    session.getProjects().stream()
-                            .map(MavenProject::getArtifact)
-                            .collect(Collectors.toSet()));
-
-            // 找出基库中有，但本工程中没有的依赖包（这些依赖包是被本工程直接依赖的Jar包或其传递依赖屏蔽了），
-            // 在生成的镜像中用空包屏蔽这些依赖包
-            final Set<String> projectDependencyFullIds = project.getArtifacts().stream()
-                    .filter(artifact -> Artifact.SCOPE_COMPILE_PLUS_RUNTIME.contains(artifact.getScope()) || Artifact.SCOPE_PROVIDED.equals(artifact.getScope()))
-                    .map(getArtifactFullId)
-                    .collect(Collectors.toSet());
-            final List<String> shieldedBaseDependencyJars = baseLibraryDependencies.keySet().stream()
-                    .filter(artifactFullId -> !projectDependencyFullIds.contains(artifactFullId))
-                    .map(baseLibraryDependencies::get)
-                    .collect(Collectors.toList());
-            if (!shieldedBaseDependencyJars.isEmpty()) {
-                // 空白jar包，用于屏蔽基库中的与本级的直接依赖冲突的包
-                final byte[] emptyJarBytes = IOUtils.toByteArray(classLoader.getResourceAsStream("empty.jar"));
-                final Path emptyJarsDirPath = jibDirPath.resolve("emptyJars");
-                final Path tempDir = emptyJarsDirPath.resolve(projectIdFileName);
-                FileUtils.deleteDirectory(tempDir.toFile());
-                Files.createDirectories(tempDir);
-                for (String shieldedBaseDependencyJar : shieldedBaseDependencyJars) {
-                    final Path emptyJarPath = tempDir.resolve(shieldedBaseDependencyJar);
-                    Files.write(emptyJarPath, emptyJarBytes);
-                    Preconditions.checkNotNull(classifiedDependencies.get(LayerType.DEPENDENCIES))
-                            .add(emptyJarPath);
-                }
-            }
-
-            return javaContainerBuilder
-                    .addDependencies(
-                            Preconditions.checkNotNull(classifiedDependencies.get(LayerType.DEPENDENCIES)))
-                    .addSnapshotDependencies(
-                            Preconditions.checkNotNull(
-                                    classifiedDependencies.get(LayerType.SNAPSHOT_DEPENDENCIES)))
-                    .addProjectDependencies(
-                            Preconditions.checkNotNull(
-                                    classifiedDependencies.get(LayerType.PROJECT_DEPENDENCIES)))
-                    .toContainerBuilder();
+            List<Path> dependencies = new DependenciesResolver().resolve(project);
+            javaContainerBuilder.addDependencies(Preconditions.checkNotNull(dependencies));
+            return javaContainerBuilder.toContainerBuilder();
 
         } catch (IOException ex) {
             throw new IOException(
                     "Obtaining project build output files failed; make sure you have "
-                            + (containerizingMode == ContainerizingMode.PACKAGED ? "packaged" : "compiled")
+                            + (isPackageErrorMessage(containerizingMode) ? "packaged" : "compiled")
                             + " your project "
                             + "before trying to build the image. (Did you accidentally run \"mvn clean "
                             + "jib:build\" instead of \"mvn clean "
-                            + (containerizingMode == ContainerizingMode.PACKAGED ? "package" : "compile")
+                            + (isPackageErrorMessage(containerizingMode) ? "package" : "compile")
                             + " jib:build\"?)",
                     ex);
         }
@@ -771,7 +684,8 @@ public class MavenProjectProperties implements ProjectProperties {
         return found.get();
     }
 
-    //private boolean isPackageErrorMessage(ContainerizingMode containerizingMode) {
-    //  return containerizingMode == ContainerizingMode.PACKAGED || isWarProject();
-    //}
+    private boolean isPackageErrorMessage(ContainerizingMode containerizingMode) {
+        return containerizingMode == ContainerizingMode.PACKAGED || isWarProject();
+    }
 }
+
